@@ -1,0 +1,1136 @@
+---
+title: "Hausarbeit"
+author: Chiara Piccolroaz
+date: "29 06 2020"
+output: html_document
+---
+
+# 1. Data Preparation
+
+Hiermit sollen die Packages installiert werden, den Working direktory identifiziert werden und die Daten importiert werden. 
+
+```{r include=FALSE}
+# Clear workspace
+rm(list=ls())
+
+# packages
+
+## standard packages
+
+#install.packages("haven")
+library(haven)
+#install.packages("foreign")
+library(foreign)
+#install.packages("tidyverse")
+library(tidyverse)
+#install.packages("stringr")
+library(stringr)
+#install.packages("plyr")
+library(plyr)
+#install.packages("tm")
+library(tm)
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("splitstackshape")
+library(splitstackshape)
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("textstem")
+library(textstem)
+#install.packages("stargazer")
+library(stargazer)
+#install.packages("gridExtra")
+library(gridExtra)
+#install.packages("ggplot2")
+library(ggplot2)
+
+## keras packages
+
+#install.packages("keras")
+#install.packages("tensorflow")
+#install.packages("base64enc")
+library(keras)
+library(tensorflow)
+#install_keras()
+#install_tensorflow()
+
+# set working directory
+getwd()
+WD <- getwd()
+list.files(path = getwd())
+
+# Load main dataset using packages foreign
+mainData <- readRDS("C:/Users/kikki/OneDrive/Documents/Corp_Bundestag_V2(1).rds") 
+
+```
+
+# 2. Data Exploration 
+
+In deisem Abschnitt sollen die Daten kurz analysiert werden. 
+
+Die Daten: es handelt sich aus parlamentarische Reden aus dem deutschen Bundestag von dem Jahr 1991 bis 2018.
+
+## 2.1. kurze Analyse über zeitliche und strukturellen Aspekten  
+2.1.1. Als erstes analysieren wir die Anzahl der Dokumenten: 
+- Die Dokumenten sind insgesamt 379545
+
+2.1.2. Jahr und Parteizugehörigkeite der Reden: 
+- Die Reden gehen von Jahr 1991 bis 2018 
+- im Schnitt gab es 13088 Reden pro Jahr
+
+2.1.3. Parties/Redner Reden:
+- es gibt 71339 NA für die Spalte über die Parteiezugehörigkeit der Redner, dennoch ist der Redner immer bekannt 
+
+## 2.2. Analyse über den Text
+2.2.1. Länge der Testen:
+- insgesamt sind die Texten 110261934 Wörter lang, und im Schnitt gibt es 291 Wörter per Text. 
+
+2.2.2. Häufigste Wörter und 2.2.3.Verteilung der Zielvariable:
+- die Häufigsten Wörter sind stopwords. Dementsprechend sollen diese gelöscht werden 
+
+```{r}
+
+# 2.1. kurze Analyse über zeitliche und strukturellen Aspekten gehen 
+
+## 2.1.1. Anzahl der Dokumenten 
+Ndoc <-nrow(mainData)
+Ndoc
+
+## 2.1.2. Jahr der Reden
+class(mainData$date)
+
+substr(mainData$date, 1, 4)%>%table(useNA = "always")%>%View()
+substr(mainData$date, 1, 4)%>%table(useNA = "always")%>%sort()
+substr(mainData$date, 1, 4)%>%table(useNA = "always")%>%mean()%>%round() #13088
+YearOfunknownPart <- NULL
+for(elem in 1:Ndoc){
+  if(is.na(mainData$party[elem])){
+    YearOfunknownPart <- c(YearOfunknownPart, mainData$date[elem])
+    }
+}
+substr(YearOfunknownPart, 1, 4)%>%table(useNA = "always")
+
+
+## 2.1.3. Parties/Redner Reden 
+class(mainData$party)
+
+table(mainData$party, useNA = "always")%>%sort()
+
+is.na(mainData$party)%>%sum()
+is.na(mainData$speaker)%>%sum()
+
+
+# 2.2 Analyse über den Text
+
+## 2.2.1. Länge der Testes
+### die Länge der jeweiliegen Texten (In Wörter gemessen)
+stringr::str_length(mainData$text)
+
+### die Länge der Texten insgesamt (In Wörter gemessen) 
+lengthTexts <- function(ColText){
+   length(unlist(stringr::str_split(ColText, " ")))
+}
+Leng_data <- lengthTexts(mainData$text)
+Leng_data
+
+lengthTextsUnique <- function(ColText){
+   length(unique(unlist(stringr::str_split(ColText, " "))))
+}
+Leng_dataUni <- lengthTextsUnique(mainData$text)
+Leng_dataUni
+
+### die Länge der Texten in Durschnitt (In Wörter gemessen) 
+DurchLenght <- Leng_data/Ndoc
+DurchLenght%>%round()
+
+# 2.2.2. Häufigste Wörter
+## die zehn häufigsten Wörter über die Texten hinweg 
+freqWord <- function(ColText, n){
+  head(sort(table(unlist(stringr::str_split((ColText)," "))), decreasing = T), n)
+}
+#freqWord <- freqWord(mainData$text, 10) 
+#freqWord
+
+# 2.2.3. Verteilung der Zielvariable
+dispWord <- function(ColText){
+  sort(table(unlist(stringr::str_split((ColText)," "))), decreasing = T)
+}
+## Hiermit werden die Häufigkeitstable für die Datei dargestellt 
+#wordsCountT <- dispWord(mainData$text)
+#wordsCountT%>%View()
+
+
+```
+
+# 3. Data Aufbereitung 
+in diesem Abschnitt sollen die Daten aufbereitet werden, um die spätere Analyse durchführen zu können
+
+## 3.1 Daten von NA bereinigen -> Analysen ermöglichen
+3.1.1. Da die Parteienzueghörigkeit für unsere Analyse eine zentrale variable ist, muss man überprüfen, dass allen Reden einer Partei zugewisen worden sind. Das ist leider nicht immer der Fall. Ab dem Jahr 2009 gibt es z.B. mehrere Tausende NA diesbezüglich. Somit sollen die Reihen mit unbekannten Party-Redner gelöscht werden
+
+## 3.2 Dummy-Variablen herstellen -> Testen
+3.1.1. Was wir zusätzlich für unsere Analyse brauchen sind Dummy-Variablen. Diese Variablen beinhalten binäre Informationen über die Parteizugehörigkeit des redners. Somit sollen 6 dummy Variablen hergestellt werden, also eine für jede Partei.
+
+## 3.3 Teile in Legislaturperiode -> experimenteller Grund
+Der Klassifizierungsalgorithmus, der in dem Schritt Nr. 6  durchgeführt wird berücksichtigt nicht die Reden aus allen Jahren, sondern nur die von einer bestimmten Legislatur Periode.
+Dafür gibt es unterschiedliche Gründe: 
+
+1. praktischer Grund: die Durchführung des Klassiffizierungsalgorithmus würde zu aufwendig sein/ zu lange dauern , falls alle 379.545 Reden berücksichtigt werden sollten. Somit können wir die Anzahl der Reden beschränken. 
+
+3. experimentellen Grund: Ziel der hausarbeit ist es das Modell zu testen. Dafür reicht dieses auf Basis einer kleineren Datenmege zu testen. Die Fokussierung auf einer Legislaturperiode schliesst nicht aus, dass der Algorithmus auch für andere Legislaturperiode angewendet werden kann, oder für alle Jahren. 
+
+2. methodischen Grund: der Klassifikationsalgorithmus muss mit Daten/Reden getestet/angewendet werden, die dieselbe Merkmalen aufweisen wie die trainings Daten/Reden haben. Würde es nicht der Fall sein, könnte der Algorithmus möglicherweise bei der Klassifizierung versagen. Man kann davon ausgehen, dass Reden aus derselben Legislaturperiode mehrere solche Merkmalen gemeinsam haben, als Reden von unterschiedlicher Legislaturperiode.   
+
+Somit soll das DF in 8 DFs geteilt werden, welche nur die Reden beinhalten, die tatsächlich in der Zeit der jeweiligen Legislatur Periode gehalten wurden.
+
+Wir nehmen für unsere Analyse als Beispiel die LegislaturPeriode 17. 
+Grund dafür ist, dass in dieser Periode die Polarisierung sehr hoch sei (Paper). Hätte man eine Periode mit niedrige Polarisierung genommen, hätte man diese entweder durch einen tatsächlichen niedrigen Unterschied zwischen Parteien oder auch durch eine fehlerhafte Analyse begründen können. 
+
+## 3.4 Transormation des Textes in eine maschinen-lesbare Form
+Hiermit sollen die texten so geändert/bereinigt werden, dass sie in eine lesbare maschine Form transformiert werden. Somit sollen Zahlen, Zeichensetzung und Stopwörter gelöscht werden. 
+Wir entwickeln zwei Frmen von Textbereinigung. In der ersten benutzen wir keine stem_strings funktion, in der zweiten schon. Diese funktion verbindet die Wörter mit demselben Präfix. Logisch betrachtet macht mehr Sinn, dennoch könnten Fehler vorkommen, die man nicht sehen kann. Deswegen behalten wir diese beide Versionen und lassen den Programm einem mit einer der beiden Versionen für Textbereinigung
+
+### NOCH ZU ERLEDIGEN/PROBLEME!!!!!!!!!!!!!!
+manche Zeichen bekomme ich gar nicht raus
+- CLEANTEXT_2 --> muss auch mit dieser Varinte ausprobieren 
+
+```{r}
+
+# 3.1.1 löschen die Reihen mit unbekanntten Party-Redner 
+DataClean<- mainData[!is.na(mainData$party), ]
+
+# 3.2 herstellen dummy Variablen
+table(DataClean$party)
+
+DataClean$AfD <- ifelse(DataClean$party == "AfD", 1, 0)
+DataClean$CDU_CSU <- ifelse(DataClean$party == "CDU/CSU", 1, 0)
+DataClean$FDP <- ifelse(DataClean$party == "FDP", 1, 0)
+DataClean$GRUENE <- ifelse(DataClean$party == "GRUENE", 1, 0)
+DataClean$independent <- ifelse(DataClean$party == "independent", 1, 0)
+DataClean$PDS_LINKE <- ifelse(DataClean$party == "PDS/LINKE", 1, 0)
+DataClean$SPD <- ifelse(DataClean$party == "SPD", 1, 0)
+
+View(select(DataClean, c(AfD, CDU_CSU, FDP, GRUENE, independent,PDS_LINKE,SPD, party )))
+
+# 3.3. Teile in den Legislature Perioden
+
+date <-c("1991-03","1994-11", "1998-10", "2002-10", "2005-10", "2009-10", "2013-10", "2017-10")
+i <- 1
+saveLine <- NULL
+for(elem in 1:nrow(DataClean)){
+  if(i <= 8){
+    if(substr(DataClean$date[elem], 1, 7) == date[i]){
+    saveLine <- c( saveLine, elem)
+    i = i+1;
+    }
+  }
+}
+saveLine
+
+LG12<- DataClean[saveLine[1]:saveLine[2]-1, ]
+LG13<- DataClean[saveLine[2]:saveLine[3]-1, ]
+LG14<- DataClean[saveLine[3]:saveLine[4]-1, ]
+LG15<- DataClean[saveLine[4]:saveLine[5]-1, ]
+LG16<- DataClean[saveLine[5]:saveLine[6]-1, ]
+LG17<- DataClean[saveLine[6]:saveLine[7]-1, ]
+LG18<- DataClean[saveLine[7]:saveLine[8]-1, ]
+LG19<- DataClean[saveLine[8]:nrow(DataClean), ]
+
+# 3.4. Transormation des Textes in eine maschinen-lesbare Form
+Normalstopwords <- tm::stopwords("german")
+
+myStopWords <- c( "dass", "mehr", "bitte", "bzw", "beim", "vgl", "sowie", "fuer", "â", "u.a", "wegen", "sog", "daher", "hinblick", "nr", "ab","evtl", "denen", "dafür", "darüber", "deshalb", "ueber", "dr", "seit", "insbesondere","gemäß","wann", "warum", "wurden", "sollen", "worden", "darauf","muß","seit", "deren", "ab", "wurde", "bereits", "trotz", "bisher", "bisherige","beim","insgesamt", "ja" , "nein","schon", "müssen","aufgrund", "ansicht", "dadurch", "weiterer","hinsichtlich","wieviel", "dafür","davon", "besonders", "hinblick", "dauer", "hinaus", "ggf","ueber","jeweils", "warum","bezüglich", "gegenueber","gemaess","insbes","inwieweit", "inwiefern","falls","wonach","gegenüber","etwa", "sei", "bereit", "weitere", "worden", "bisher", letters, "januar", "februar", "märz", "maerz", "april","mai","derzeit", "juni", "juli", "august", "september", "oktober", "november", "dezember", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "herr", "herren","herrn", "damen", "frau", "immer", "ganz", "gerade", "genau", "deswegen", "sollen", "–", "wirklich", "klar", "eigentlich", "darum", "„", "gibt", "geht", "gesagt", "tun", "wäre", "dabei", "sollten", "gar", "darf", "sage", "dürfen", "kollegin", "kollege", "kollegen", "kolleginnen", "darin", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "genauso", "bisschen", "dagegen", "ebenfalls", "wären", "außerdem", "lässt", "lassen", "weder", "noch", "eher", "daraus", "seien", "wollten", "mittlerweile", "zudem", "zusätzlich", "geehrten", "geehrte", "geehrter", "tut", "müsste", "zusätzliche", "ging", "je", "danach", "sodass", "bislang", "bevor", "dennoch", "drittens", "somit", "kam", "her", "heraus", "hinzu", "dar", "außer", "hinweg", "zurzeit", "zuvor", "umso", "circa", "davor", "hingegen", "könne", "per", "erstmals", "zuerst", "letzter", "außerhalb", "hierbei")
+
+
+LG17$cleanText1 <- LG17$text
+LG17$cleanText2 <- LG17$text
+
+#cleanText1
+LG17$cleanText1 <- removePunctuation(LG17$cleanText1,preserve_intra_word_contractions = FALSE,preserve_intra_word_dashes = FALSE)
+LG17$cleanText1 <- removeNumbers(LG17$cleanText1)
+LG17$cleanText1 <- tolower(LG17$cleanText1 )
+LG17$cleanText1 <- removeWords(LG17$cleanText1,Normalstopwords)
+LG17$cleanText1 <- removeWords(LG17$cleanText1,myStopWords)
+LG17$cleanText1 <-str_squish(LG17$cleanText1)
+
+#cleanText2
+LG17$cleanText2 <- stem_strings(LG17$cleanText1, language = "german")
+
+#check 
+dispWord(LG17$cleanText1)%>%View()
+dispWord(LG17$cleanText2)%>%View()
+
+# we Start with LG17$cleanText2
+LG17$cleanText <- LG17$cleanText2
+
+
+# descriptive Satistik 
+disp <- dispWord(LG17$cleanText)%>%View()
+
+disp
+
+names(LG17)
+table(LG17$party, useNA = "always")%>%sort()
+pdf("myplot.pdf")
+myplot <- ggplot(LG17, aes(x=party)) +  geom_bar()
+print(myplot)
+dev.off()
+ggsave(myplot, filename = "myplot.pdf",width = 6, height = 3, units = "in")
+
+
+lengthTexts(LG17$cleanText)
+lengthTextsUnique(LG17$cleanText)
+
+round(6705806/nrow(LG17))
+
+```
+
+Um Speicherplatz zu speichern, werden alle nicht relevante Daten gelöscht und nur die Daten/reden der Legislaturperiode 17 behalten.  
+
+```{r}
+
+save(LG17, file = "LG17.Rdata")
+rm(list=ls())
+load("LG17.Rdata")
+
+```
+
+
+# 4. Datenaufteilung 
+## 4.1 Splitting in Test und Treining (Stratifizierung und out of sample)
+Nachdem der Text bereinigt wurde, soll zwischen Training data und Testing data unterschieden werden/aufgeteilt werden. Wir herstellen eine Funktion, die die ID/Zeilennummer für die Training und Testing data wiedergibt (Dafür müssen wir zuerst eine Spalte mit den IDs bauen)
+Theoretisch könnte einen out-of-sample split durchgeführt werden, wobei training Data 80% whärend tasting data 20% der gesamt Daten beinhalten. Das problem dabei ist, dass die Parteizugehörigkeit der Reden innerhalb der beiden Datensätzen ungleichmässig aufgeteil werden könnte. Es könnte den Fall auftreten, dass in dem Training-Datesatz kaum Reden der CDU/CSU gibt, da die Aufteilung zufällig ist, und somit das entstechende Modell nicht ausreichend traniert werden kann. Aus diesem Grund, führen wir erstens eine Stratifizierung und dann einen out-of-sample durch, um sicher zu sein, dass jede Partei, in dem Test-Datensatz als auch in dem Training Datensatz, gleich vetreten sind. D.h das Training-Datensatz wird 80% der Reden aus jeder Partei beinhalten und der Test-Datensatz wird 20% der Reden aus jeder Partei beinhalten. 
+
+## 4.2 splitting in Parteipaaren
+
+Da wir später die Unterscheidbarkeit/Polarisierungsgrad zwischen je zwei Parteien analysieren möchten, sollen wir den Test Datensatz so aufteilen, dass es immer die Reden zweier Parteien beinhalten sind. Die reihenfolge spielt keine Rolle. 
+Dafür bilden wir eine Funktion, die für jedes Parteipaar die Zeile/Rows/ID von dem Test Datensatz speichert, die Reden beinhalten, die von einer von den beiden Parteien dieses Parteinpaar gehalten wurden. Diese benutzen wir im späteren Schritt, um die DTMs zu besteimmen. Gespeichert werden auch in deisem Fall die IDs der Zeilen/Reden 
+
+```{r}
+# 4.1 Splitting in Test und Treining
+LG17$rowID <- 1:nrow(LG17)
+
+set.seed(430)
+trainId <-  stratified(LG17, "party", .8)$rowID
+testId <- (1:nrow(LG17))[1:nrow(LG17)%in% trainId == FALSE]
+
+#check 
+length(trainId) + length(testId) == nrow(LG17)
+intersect(trainId,testId)
+
+## 4.2 splitting in Parteipaaren
+# Funktion
+table(LG17$party)
+
+getPartyPaarID <- function(party1, party2){
+  PartyPaarID <- NULL
+  for(elem in LG17$rowID){
+    if(elem%in%testId){
+      if(LG17$party[elem] == party1 ||LG17$party[elem] == party2 ){
+        PartyPaarID <- c(PartyPaarID, elem)
+      }
+    }
+  }
+  return(PartyPaarID)
+}
+
+
+#speichere die ID
+ID_CC <- getPartyPaarID("CDU/CSU", "CDU/CSU")
+ID_LL <- getPartyPaarID("PDS/LINKE", "PDS/LINKE")
+ID_FF <- getPartyPaarID("FDP", "FDP")
+ID_SS <- getPartyPaarID("SPD", "SPD")
+ID_GG <- getPartyPaarID("GRUENE", "GRUENE")
+#ID_AA <- getPartyPaarID("AfD", "AfD")
+
+ID_CS <- getPartyPaarID("CDU/CSU", "SPD")
+ID_CF <- getPartyPaarID("CDU/CSU", "FDP")
+ID_CL <- getPartyPaarID("CDU/CSU", "PDS/LINKE")
+ID_CG <- getPartyPaarID("CDU/CSU", "GRUENE")
+#ID_CA <- getPartyPaarID("CDU/CSU", "AfD")
+ID_FS <- getPartyPaarID("FDP", "SPD")
+ID_FL <- getPartyPaarID("FDP", "PDS/LINKE")
+ID_FG <- getPartyPaarID("FDP", "GRUENE")
+#ID_FA <- getPartyPaarID("FDP", "AfD")
+ID_SL <- getPartyPaarID("SPD", "PDS/LINKE")
+ID_SG <- getPartyPaarID("SPD", "GRUENE")
+#ID_SA <- getPartyPaarID("SPD", "AfD")
+ID_GL <- getPartyPaarID("GRUENE", "PDS/LINKE")
+#ID_GA <- getPartyPaarID("GRUENE", "AfD")
+#ID_LA <- getPartyPaarID("PDS/LINKE", "AfD")
+
+
+#check 
+listof20TestID <- list(ID_CC,ID_LL, ID_FF, ID_SS, ID_GG, ID_CS, ID_CF,ID_CL, ID_CG, ID_FS, ID_FL, ID_FG, ID_SL,ID_SG,ID_GL)
+
+for(elem in 1:length(listof20TestID)){
+    print(intersect(listof20TestID[elem], trainId))
+}
+
+```
+
+# 5. Herstellung  einer DTM
+Hiermit sollen DTMs mit Hilfe der Keras-Aufbereitungsfunktionen hergestellt werden 
+
+## 5.1. DTM für Training
+Es sollen ein DTM für das Training- Datensatz aufgebaut werden, derren Zeilen/IDs schon ein dem oberen Schritt bestimmt worden sind. Für das TrainingDTM werden alle Zeilen/Ids aus dem Training- Datensatz angewendet
+
+## 5.2 DTM für Test: Parteienpaare
+Ebenso soll ein DTM für Test-datensatz aufgebaut werden, derren Zeilen/IDs schon ein dem oberen Schritt bestimmt worden sind. 
+Genauer betrachten werden wir nicht 1 TestDTM sondern 20 haben.
+Es soll nähmlich für jedes Parteipaar ein DTM gebaut wird, und die Parteipaare sind insgesamtt 20. Der Grund dafür wir ein Lauf der nächsten Schritte klarer. Die Zeilen für die herstellung der DTMs haben wir bereits in dem oberen Schritt festgestellt. Für das TrainingDTM werden die Zeilen/Ids aus dem Test- Datensatz angewendet. 
+
+### NOCH ZU ERLEDIGEN/PROBLEME!!!!!!!!!!!!!!
+We can would argue that there is no single true strategy to choosing this value. Instead, the answer should come from leveraging the characteristics and statistics of your training data.
+
+
+```{r}
+## 5.1. DTM für Test und Treining
+#Leng_LG17 <- lengthTexts(LG17$cleanText)
+#Leng_LG17
+
+#wordsCountT <- dispWord(LG17$cleanText)
+#wordsCountT%>%View()
+
+w = 5000
+w
+
+tok_anfrage <- text_tokenizer(num_words = w, lower = T, split = " ")
+fit_text_tokenizer(tok_anfrage, LG17$cleanText)
+keras::save_text_tokenizer(tok_anfrage, "my_tokenizer") # Speicher
+tok <- keras::load_text_tokenizer("my_tokenizer") # Laden
+
+train_dtm <- keras::texts_to_matrix(tok, LG17$cleanText[trainId], mode = "count")
+test_dtm <- keras::texts_to_matrix(tok, LG17$cleanText[testId], mode = "count")
+
+## 5.2 DTM für Parteienpaare
+test_dtmCC<- keras::texts_to_matrix(tok, LG17$cleanText[ID_CC], mode = "count")
+test_dtmSS<- keras::texts_to_matrix(tok, LG17$cleanText[ID_SS], mode = "count")
+test_dtmLL<- keras::texts_to_matrix(tok, LG17$cleanText[ID_LL], mode = "count")
+test_dtmFF<- keras::texts_to_matrix(tok, LG17$cleanText[ID_FF], mode = "count")
+test_dtmGG<- keras::texts_to_matrix(tok, LG17$cleanText[ID_GG], mode = "count")
+#test_dtmAA<- keras::texts_to_matrix(tok, LG17$cleanText[ID_AA], mode = "count")
+
+test_dtmCS<- keras::texts_to_matrix(tok, LG17$cleanText[ID_CS], mode = "count")
+test_dtmCF<- keras::texts_to_matrix(tok, LG17$cleanText[ID_CF], mode = "count")
+test_dtmCL<- keras::texts_to_matrix(tok, LG17$cleanText[ID_CL], mode = "count")
+test_dtmCG<- keras::texts_to_matrix(tok, LG17$cleanText[ID_CG], mode = "count")
+#test_dtmCA<- keras::texts_to_matrix(tok, LG17$cleanText[ID_CA], mode = "count")
+test_dtmFS<- keras::texts_to_matrix(tok, LG17$cleanText[ID_FS], mode = "count")
+test_dtmFL <- keras::texts_to_matrix(tok, LG17$cleanText[ID_FL], mode = "count")
+test_dtmFG <- keras::texts_to_matrix(tok, LG17$cleanText[ID_FG], mode = "count")
+#test_dtmFA <- keras::texts_to_matrix(tok, LG17$cleanText[ID_FA], mode = "count")
+test_dtmSL <- keras::texts_to_matrix(tok, LG17$cleanText[ID_SL], mode = "count")
+test_dtmSG <- keras::texts_to_matrix(tok, LG17$cleanText[ID_SG], mode = "count")
+#test_dtmSA <- keras::texts_to_matrix(tok, LG17$cleanText[ID_SA], mode = "count")
+test_dtmGL <- keras::texts_to_matrix(tok, LG17$cleanText[ID_GL], mode = "count")
+#test_dtmGA <- keras::texts_to_matrix(tok, LG17$cleanText[ID_GA], mode = "count")
+#test_dtmLA <- keras::texts_to_matrix(tok, LG17$cleanText[ID_LA], mode = "count")
+
+```
+
+
+# 6. Modell Trainieren 
+
+In dem folgenden benutzen wir das Algorithmus Xgboost als Trainigsalgorithmus, das relativ wenig Hyper-parameter (Werte die wir vorher definieren müssen) benötigt und eine gute Leistung (Time/Throuput) bietet.
+
+Mit diesem sollen sechs Modelle trainiert werden. Die Zahl sechs ergibt sich aus der Anazhl der Parteien. Jedes Modell muss nähmlich so trainiert werden, dass es eine bestimmte Partei von allen anderen Parteien unterscheiden kann. 
+Nehmen wir als Beispiel das Modell "ModellCDU_CSU." Dies Modell wird traniert, die Reden von CDU_CSU Parteien von den Reden von allen anderen Parteien (nicht-CDU_CSU-Parteien) zu unterscheiden, bzw. diese richtig zuzuordnen.
+
+GÜTE DES MODELLS
+This step is the most critical part of the process for the quality of our model, due the quality of the model depends on the parameter which are used to build it.
+
+- verbosity: Verbosity of printing messages. Valid values are 0 (silent), 1 (warning), 2 (info), 3 (debug). Sometimes XGBoost tries to change configurations based on heuristics, which is displayed as warning message. If there’s unexpected behaviour, please try to increase value of verbosity. -> 3
+
+- nthread: default to maximum number of threads available if not set. Number of parallel threads used to run XGBoost -> do not set 
+
+- eta: control the learning rate. It scales the contribution of each tree by a factor of 0 < eta < 1 when it is added to the current approximation. Used to prevent overfitting by making the boosting process more conservative. Lower value for eta implies larger value for nrounds: low eta value means model more robust to overfitting but slower to compute. Default: 0.3 -> defalt seems good. -> nrouns: high
+
+- max_depth: maximum depth of a tree. --> Default: 6. I f to high will produce overfitting
+
+- early_stopping_rounds: If NULL, the early stopping function is not triggered. If set to an integer k, training with a validation set will stop if the performance doesn't improve for k rounds. Setting this parameter engages the cb.early.stop callback. -> k = 1
+
+Probleme die auftreten können und die Güte des Modells negativ beeinflussen können, sind: overfitting und validation. Wir möchten nähmlich ein Modell bauen, der sehr gut vorhersagen kann, ohne die Gefahr zu overfitting haben. 
+
+- overfitting: Lösung = early_stopping_rounds
+
+- güte: Lösung = small trees, more iteration (avoding overfitting)
+  
+- Validation: Output = error
+
+
+```{r}
+
+# 6.1. Modelle bauen
+#check
+class(train_dtm) #matrix
+dim(train_dtm) # beinhaltet die 3000 Wörter
+str(train_dtm)
+
+# Modell CDU/CSU #train-error:0.171207; nround: 1
+labCDU_CSU <- LG17$CDU_CSU[trainId] #das ist "label" Parameter
+class(labCDU_CSU) #ist numerisch 
+table(labCDU_CSU, useNA = "always") #beinhaltet 0 oder 1, und kein NA
+length(labCDU_CSU) 
+
+modelCDU_CSU <-xgboost::xgboost(data = train_dtm, 
+                         label = labCDU_CSU ,
+                         max_depth = 6, 
+                         nrounds = 30,
+                         scale_pos_weight = 2,
+                         verbose = 2,
+                         eta = 0.30,
+                         early_stopping_rounds = 1,
+                         objective = "binary:logistic")
+
+
+# Modell FDP #train-error:0.100412 ; nround: 30
+labFDP <- LG17$FDP[trainId] #das ist "label" Parameter
+class(labFDP) #ist numerisch 
+table(labFDP, useNA = "always") #beinhaltet 0 oder 1, und kein NA
+length(labFDP) 
+
+modelFDP <-xgboost::xgboost(data = train_dtm, 
+                         label = labFDP ,
+                         max_depth = 6, 
+                         nrounds = 30,
+                         scale_pos_weight = 2,
+                         verbose = 2,
+                         eta = 0.30,
+                         early_stopping_rounds = 1,
+                         objective = "binary:logistic")
+
+
+# Modell GRUENE #train-error:0.163565; nround: 3
+labGRUENE <- LG17$GRUENE[trainId] #das ist "label" Parameter
+class(labGRUENE) #ist numerisch 
+table(labGRUENE, useNA = "always") #beinhaltet 0 oder 1, und kein NA
+length(labGRUENE) 
+
+modelGRUENE <-xgboost::xgboost(data = train_dtm, 
+                         label = labGRUENE ,
+                         max_depth = 6, 
+                         nrounds = 30,
+                         scale_pos_weight = 2,
+                         verbose = 2,
+                         eta = 0.30,
+                         early_stopping_rounds = 1,
+                         objective = "binary:logistic")
+
+# Modell PDS/LINKE #train-error:0.081802; nround: 30
+labPDS_LINKE <- LG17$PDS_LINKE [trainId] #das ist "label" Parameter
+class(labPDS_LINKE) #ist numerisch 
+table(labPDS_LINKE, useNA = "always") #beinhaltet 0 oder 1, und kein NA
+length(labPDS_LINKE) 
+
+modelPDS_LINKE <-xgboost::xgboost(data = train_dtm, 
+                         label = labPDS_LINKE ,
+                         max_depth = 6, 
+                         nrounds = 30,
+                         scale_pos_weight = 2,
+                         verbose = 2,
+                         eta = 0.30,
+                         early_stopping_rounds = 1,
+                         objective = "binary:logistic")
+
+# Modell SPD #train-error:0.211870; nround: 1
+labSPD <- LG17$SPD[trainId] #das ist "label" Parameter
+class(labSPD) #ist numerisch 
+table(labSPD, useNA = "always") #beinhaltet 0 oder 1, und kein NA
+length(labSPD) 
+
+modelSPD <-xgboost::xgboost(data = train_dtm, 
+                         label = labSPD ,
+                         max_depth = 6, 
+                         nrounds = 30,
+                         scale_pos_weight = 2,
+                         verbose = 2,
+                         eta = 0.30,
+                         early_stopping_rounds = 1,
+                         objective = "binary:logistic")
+
+# Modell Afd
+#labAfD <- LG17$AfD[trainId] #das ist "label" Parameter
+#class(labAfD) #ist numerisch 
+#table(labAfD, useNA = "always") #beinhaltet 0 oder 1, und kein NA
+#length(labAfD) 
+
+#modelAfD <-xgboost::xgboost(data = train_dtm, 
+                #         label = labAfD ,
+                #         max_depth = 2, 
+                #         nrounds = 30,
+                #         scale_pos_weight = 2,
+                #         verbose = 2,
+                #         eta = 0.30,
+                #         early_stopping_rounds = 1,
+                #         objective = "binary:logistic")
+
+
+```
+
+
+# 7. Modell Evaluieren
+
+Dieser und der nächste Schritt sind die relevantesten für die Analyse.
+
+Voraussetzung:
+- 6 Modelle. 
+Jedes Modell ist daran treniert eine bestimmte Partei von allen anderen zu unterscheiden. Somit ergeben sich sechs Modellen und keine 20 Modellen. 
+Grund dafür liegt in der Definition von Polariseirug = Unterscheidbarbeit 1 Partei vs allen anderen = bennötigt ein Modell/Instrument, das sich auf allen anderen anwenden lässt 
+- Reden aus je zwei Parteien. Also insgesammt 15 Gruppen/ KOmbinationen 
+
+Annahmen:
+1. interparteilische Heterogenität und intraparteilische Homogenität
+2. Reden = x Merkmalen
+3. x merkmalen = Polariseirung 
+4. Algoritmus erkennt diese x Merkmalen und somit Polariseirung
+
+Idee: 
+je ähnlicher die Merkmalen, desto weniger Polariseirungsgrad
+
+Prozess:
+Mit der folgenden Funktion wird für jede Rede aus je zwei Parteipaaren, also aus jede der 15 Gruppen, die Wahrschinlichkeit berechnet, dass diese Reden einer bstimmten Partei gehört. 
+Diese Wahrschinlchekeiten werden mit mithilfen von den vorher trenierte Modellen berechenet. Die Reden aus jedem Parteipaar wird mit je zwei Modellen vorhersagt, und zwar mit Modellen für die zwei Parteien aus dem Parteipaar. Dies wird uns später für die Berechnung der innere Validität helfen
+
+
+```{r}
+
+# 1. Test-Datensatz vorhersagen
+
+predictionsFAll <- predict(modelFDP, test_dtm)
+predictionsFF <- predict(modelFDP, test_dtmFF)
+predictionsFG <- predict(modelFDP, test_dtmFG)
+predictionsFS <- predict(modelFDP, test_dtmFS)
+predictionsFL <- predict(modelFDP, test_dtmFL)
+predictionsFC <- predict(modelFDP, test_dtmCF)
+#predictionsFA <- predict(modelFDP, test_dtmFA)
+
+predictionsGAll <- predict(modelGRUENE, test_dtm)
+predictionsGG <- predict(modelGRUENE, test_dtmGG)
+predictionsGF <- predict(modelGRUENE, test_dtmFG)
+predictionsGL <- predict(modelGRUENE, test_dtmGL)
+predictionsGS <- predict(modelGRUENE, test_dtmSG)
+predictionsGC <- predict(modelGRUENE, test_dtmCG)
+#predictionsGA <- predict(modelGRUENE, test_dtmGA)
+
+predictionsLAll <- predict(modelPDS_LINKE, test_dtm)
+predictionsLL <- predict(modelPDS_LINKE, test_dtmLL)
+predictionsLF <- predict(modelPDS_LINKE, test_dtmFL)
+predictionsLG <- predict(modelPDS_LINKE, test_dtmGL)
+predictionsLS <- predict(modelPDS_LINKE, test_dtmSL)
+predictionsLC <- predict(modelPDS_LINKE, test_dtmCL)
+#predictionsLA <- predict(modelPDS_LINKE, test_dtmLA)
+
+predictionsSAll <- predict(modelSPD, test_dtm)
+predictionsSS <- predict(modelSPD, test_dtmSS)
+predictionsSF <- predict(modelSPD, test_dtmFS)
+predictionsSG <- predict(modelSPD, test_dtmSG)
+predictionsSL <- predict(modelSPD, test_dtmSL)
+predictionsSC <- predict(modelSPD, test_dtmCS)
+#predictionsSA <- predict(modelSPD, test_dtSLA)
+
+predictionsCAll <- predict(modelCDU_CSU, test_dtm)
+predictionsCC <- predict(modelCDU_CSU, test_dtmCC)
+predictionsCF <- predict(modelCDU_CSU, test_dtmCF)
+predictionsCG <- predict(modelCDU_CSU, test_dtmCG)
+predictionsCL <- predict(modelCDU_CSU, test_dtmCL)
+predictionsCS <- predict(modelCDU_CSU, test_dtmCS)
+#predictionsUA <- predict(modelCDU_CSU, test_dtmCA)
+
+#predictionsAA <- predict(modelAfD, test_dtmAA)
+#predictionsAF <- predict(modelAfD, test_dtmAF)
+#predictionsAG <- predict(modelAfD, test_dtmAG)
+#predictionsAL <- predict(modelAfD, test_dtmAL)
+#predictionsAS <- predict(modelAfD, test_dtmAS)
+#predictionsAC <- predict(modelAfD, test_dtmAC)
+
+
+```
+
+##8 . Transformieren Sie die Wahrscheinlichkeiten (0 < p < 1) zu Kategorien/Klassen/Entscheidungen -> [0, 1]. Erklären Sie kurz, wie sie es gemacht haben.
+
+In diesem Schritt soll die Wahrscheinlichkeiten (0 < p < 1) der Parteizugehörigkeit für eine Rede, die oben berechnet worden ist, klassifiziert werden. 
+
+Wir errinern und dran, dass jede der Reden im Testdatensatz einen Wert zugewiesen wird, der die Wahrscheinlichkeit vorhersagt, dass die Rede von einer bestimmten partei gehalten sei. Abhängig von diesem Wert sollen die Daten ketegorisiert werden. Der Grenzwert ist auf 0.5 festgelegt, d.h. die Dokumente, die eine Wahrscheinlichkeit von 50% oder mehr haben, dass die rede von der bestimmten partei gehalten wird, erhalten den Wert 1. Haben die Dokumente hingegen eine Wahrscheinlichkeit von weniger als 50 %, erhalten den Wert 0. 
+
+```{r}
+#mean(as.numeric(predictionsFG > 0.5) != LG17$FDP[ID_FG]) # beste
+#mean(as.numeric(predictionsFG > 0.6) != LG17$FDP[PPFDPundGRUENE])
+#mean(as.numeric(predictionsFG > 0.7) != LG17$FDP[PPFDPundGRUENE])
+#mean(as.numeric(predictionsFG > 0.8) != LG17$FDP[PPFDPundGRUENE])
+#mean(as.numeric(predictionsFG > 0.9) != LG17$FDP[PPFDPundGRUENE])
+
+klassFAll <- ifelse(predictionsFAll > 0.5, 1, 0 )
+klassFF <- ifelse(predictionsFF >0.5, 1, 0)
+klassFG <- ifelse(predictionsFG >0.5, 1, 0)
+klassFL <- ifelse(predictionsFL >0.5, 1, 0)
+klassFC <- ifelse(predictionsFC >0.5, 1, 0)
+klassFS <- ifelse(predictionsFS >0.5, 1, 0)
+#klassFa <- ifelse(predictionsFa >0.5, 1, 0)
+
+klassGAll <- ifelse(predictionsGAll > 0.5, 1, 0 )
+klassGG <- ifelse(predictionsGG >0.5, 1, 0)
+klassGF <- ifelse(predictionsGF >0.5, 1, 0)
+klassGL <- ifelse(predictionsGL >0.5, 1, 0)
+klassGS <- ifelse(predictionsGS >0.5, 1, 0)
+klassGC <- ifelse(predictionsGC >0.5, 1, 0)
+#klassGA <- ifelse(predictionsGA >0.5, 1, 0)
+
+klassLAll <- ifelse(predictionsLAll > 0.5, 1, 0 )
+klassLL <- ifelse(predictionsLL >0.5, 1, 0)
+klassLF <- ifelse(predictionsLF >0.5, 1, 0)
+klassLG <- ifelse(predictionsLG >0.5, 1, 0)
+klassLS <- ifelse(predictionsLS >0.5, 1, 0)
+klassLC <- ifelse(predictionsLC >0.5, 1, 0)
+#klassLA <- ifelse(predictionsLA >0.5, 1, 0)
+
+klassSAll <- ifelse(predictionsSAll > 0.5, 1, 0 )
+klassSS <- ifelse(predictionsSS >0.5, 1, 0)
+klassSF <- ifelse(predictionsSF >0.5, 1, 0)
+klassSG <- ifelse(predictionsSG >0.5, 1, 0)
+klassSL <- ifelse(predictionsSL >0.5, 1, 0)
+klassSC <- ifelse(predictionsSC >0.5, 1, 0)
+#klassSA <- ifelse(predictionsSA >0.5, 1, 0)
+
+klassCAll <- ifelse(predictionsCAll > 0.5, 1, 0 )
+klassCC <- ifelse(predictionsCC >0.5, 1, 0)
+klassCF <- ifelse(predictionsCF >0.5, 1, 0)
+klassCG <- ifelse(predictionsCG >0.5, 1, 0)
+klassCL <- ifelse(predictionsCL >0.5, 1, 0)
+klassCS <- ifelse(predictionsCS >0.5, 1, 0)
+#klassCA <- ifelse(predictionsCA >0.5, 1, 0)
+
+#klassAA <- ifelse(predictionsAA >0.5, 1, 0)
+#klassAG <- ifelse(predictionsAG >0.5, 1, 0)
+#klassAL <- ifelse(predictionsAL >0.5, 1, 0)
+#klassAC <- ifelse(predictionsAC >0.5, 1, 0)
+#klassAS <- ifelse(predictionsAS >0.5, 1, 0)
+#klassAF <- ifelse(predictionsAF >0.5, 1, 0)
+
+klassFG <- ifelse(predictionsFG >0.5, 1, 0)#check
+data.frame(predictionsFG,klassFG )%>%View()
+table(klassFG, useNA = "always")
+
+```
+
+#9.Güte des Modells und Polarisierungsgrad
+
+## 9.1 function to compute accuracy, Precision, Recall
+In diesem Schritt werden die Funktionen geschrieben, um Accuracy, Precision und Recall zu berechnen. Mit diesen können Aussagen über die Güte der Modelle getroffen werden bzw über die Polarisierungsgrad zwischen Parteien. 
+
+Wir benutzen alle drei.
+
+## 9.2 Accurancy 
+- Accurancy beschreibt, wie gut das Modell insgesamt ist. 
+Mit diesen Daten bauen wir eine Matrix, um die Werte miteinader besser vergleichen zu können.
+
+## 9.3 Precision 
+- Precision sagt voraus, mit welcher Wahrscheinlichkeit die Zugehörigkeit zu einer Klasse richtig ist. Wenn das Modell also 1 vorhersagt, wie sicher kann man dann sein, dass die Vorhersage richtig ist.
+Mit diesen Daten bauen wir eine Matrix, um die Werte miteinader besser vergleichen zu können. 
+
+## 9.4 Recall 
+- Recall beschreibt, wie genau das Modell in der Lage ist, die zu einer Klasse gehörenden Dokumente korrekt zu klassifizieren. Das bedeutet, wie viele der Dokumente, die in der Klasse x hätten klassifiziert werden sollen, tatsächlich in dieser Klasse klassifiziert worden sind. 
+Mit diesen Daten bauen wir eine Matrix, um die Werte miteinader besser vergleichen zu können. 
+
+
+
+
+```{r}
+
+## 9.1 function to compute accuracy, Precision, Recall
+accuracy <- function(col, PP, klass){
+  tab <- table(col[PP], klass)
+  acc <- (tab[1,1]+ tab[2,2])/length(col[PP])
+  return(acc)
+} 
+
+accuracyPP <- function(col, PP, klass){
+  tab <- table(col[PP], klass)
+  acc <- (0 + tab[1,2])/length(col[PP])
+  return(acc)
+} 
+
+# function to compute precision
+precision <- function(col, PP, klass){
+  tab <- table(col[PP], klass)
+  ( tab[2,2])/(tab[2,2]+tab[1,2])
+}
+
+# function to compute recall
+recall <- function(col, PP, klass){
+   tab <- table(col[PP], klass)
+  ( tab[2,2])/(tab[2,2]+tab[2,1])
+}
+
+recallPP <- function(col, PP, klass){
+  tab <- table(col[PP], klass)
+  acc <- (tab[1,2])/length(col[PP])
+  return(acc)
+}
+
+```
+
+Accurancy 
+
+```{r}
+## 9.2 accurancy 
+AccFF <- accuracyPP(LG17$FDP,ID_FF, klassFF) 
+AccFG <- accuracy(LG17$FDP,ID_FG, klassFG)
+AccFL <- accuracy(LG17$FDP,ID_FL, klassFL)
+AccFS <- accuracy(LG17$FDP,ID_FS, klassFS)
+AccFC <- accuracy(LG17$FDP,ID_CF, klassFC) 
+#AccFA <- accuracy(LG17$FDP,ID_FA , klassFA)
+
+AccSS <- accuracyPP(LG17$SPD,ID_SS , klassSS) 
+AccSC <- accuracy(LG17$SPD,ID_CS , klassSC)
+AccSF <- accuracy(LG17$SPD,ID_FS , klassSF)
+AccSL <- accuracy(LG17$SPD,ID_SL , klassSL)
+AccSG <- accuracy(LG17$SPD,ID_SG , klassSG)
+#AccSA <- accuracy(LG17$SPD,ID_SA , klassSA)
+
+AccGG <- accuracyPP(LG17$GRUENE,ID_GG , klassGG)
+AccGC <- accuracy(LG17$GRUENE,ID_CG , klassGC)
+AccGF <- accuracy(LG17$GRUENE,ID_FG , klassGF)
+AccGL <- accuracy(LG17$GRUENE,ID_GL , klassGL)
+AccGS <- accuracy(LG17$GRUENE,ID_SG , klassGS)
+#AccGA <- accuracy(LG17$GRUENE,ID_GA , klassGA)
+
+AccLL <- accuracyPP(LG17$PDS_LINKE,ID_LL , klassLL) 
+AccLC <- accuracy(LG17$PDS_LINKE,ID_CL , klassLC)
+AccLF <- accuracy(LG17$PDS_LINKE,ID_FL , klassLF)
+AccLG <- accuracy(LG17$PDS_LINKE,ID_GL , klassLG)
+AccLS <- accuracy(LG17$PDS_LINKE,ID_SL , klassLS)
+#AccLA <- accuracy(LG17$PDS_LINKE,ID_LA , klassLA)
+
+AccCC <- accuracyPP(LG17$CDU_CSU,ID_CC , klassCC)
+AccCS <- accuracy(LG17$CDU_CSU,ID_CS , klassCS) 
+AccCF <- accuracy(LG17$CDU_CSU,ID_CF , klassCF)
+AccCL <- accuracy(LG17$CDU_CSU,ID_CL , klassCL)
+AccCG <- accuracy(LG17$CDU_CSU,ID_CG , klassCG)
+#AccCA <- accuracy(LG17$CDU_CSU,ID_UA , klassCA)
+
+ResultsAccurancy <- matrix( nrow = 7, ncol = 6)
+ModelParty <- c("Modell_Union", "Modell_SPD", "Modell_FDP", "Modell_Linke", "Modell_Grüne")
+Parties <- c("Union", "SPD", "FDP", "Linke", "Grüne")
+U <- round(c(AccCC, AccCS, AccCF, AccCL, AccCG ), digits = 3)
+S <- round(c(AccSC, AccSS, AccSF, AccSL, AccSG ), digits = 3)
+F <- round(c(AccFG, AccFL, AccFF, AccFS, AccFC ), digits = 3)
+L <- round(c(AccLC,AccLF, AccLG, AccLL, AccLS ), digits = 3)
+G <- round(c(AccGC, AccGF, AccGL, AccGS, AccGG), digits = 3)
+
+for(elem in  2:6){
+  ResultsAccurancy[1,elem] = ModelParty[elem-1]
+}
+for(elem in  2:6){
+  ResultsAccurancy[2,elem] = Parties[elem-1]
+}
+for(elem in  3:7){
+  ResultsAccurancy[elem,1] = Parties[elem-2]
+}
+for(elem in 3:7){
+  ResultsAccurancy[elem, 2] = U[elem-2]
+}
+for(elem in 3:7){
+  ResultsAccurancy[elem, 3] = S[elem-2]
+}
+for(elem in 3:7){
+  ResultsAccurancy[elem, 4] = F[elem-2]
+}
+for(elem in 3:7){
+  ResultsAccurancy[elem, 5] = L[elem-2]
+}
+for(elem in 3:7){
+  ResultsAccurancy[elem, 6] = G[elem-2]
+}
+
+# view
+ResultsAccurancy%>%view()
+
+# save HTML
+sink("./ResultsHA.html") 
+stargazer(ResultsAccurancy, type = "html")
+sink(NULL)
+
+#save TEX
+sink("./ResultsHA.tex") 
+stargazer(ResultsAccurancy)
+sink(NULL)
+
+
+```
+
+experimentelle andere Versionen 
+
+```{r}
+
+## 9.2 accurancy 
+AccFAll <- accuracy(LG17$FDP, testId, klassFAll) 
+AccFF <- accuracyPP(LG17$FDP,ID_FF, klassFF) 
+AccFG <- accuracy(LG17$FDP,ID_FG, klassFG)
+AccFL <- accuracy(LG17$FDP,ID_FL, klassFL)
+AccFS <- accuracy(LG17$FDP,ID_FS, klassFS)
+AccFC <- accuracy(LG17$FDP,ID_CF, klassFC) 
+#AccFA <- accuracy(LG17$FDP,ID_FA , klassFA)
+
+AccSAll <- accuracy(LG17$SPD, testId, klassSAll) 
+AccSS <- accuracyPP(LG17$SPD,ID_SS , klassSS) 
+AccSC <- accuracy(LG17$SPD,ID_CS , klassSC)
+AccSF <- accuracy(LG17$SPD,ID_FS , klassSF)
+AccSL <- accuracy(LG17$SPD,ID_SL , klassSL)
+AccSG <- accuracy(LG17$SPD,ID_SG , klassSG)
+#AccSA <- accuracy(LG17$SPD,ID_SA , klassSA)
+
+AccGAll <- accuracy(LG17$GRUENE, testId, klassGAll) 
+AccGG <- accuracyPP(LG17$GRUENE,ID_GG , klassGG)
+AccGC <- accuracy(LG17$GRUENE,ID_CG , klassGC)
+AccGF <- accuracy(LG17$GRUENE,ID_FG , klassGF)
+AccGL <- accuracy(LG17$GRUENE,ID_GL , klassGL)
+AccGS <- accuracy(LG17$GRUENE,ID_SG , klassGS)
+#AccGA <- accuracy(LG17$GRUENE,ID_GA , klassGA)
+
+AccLAll <- accuracy(LG17$PDS_LINKE, testId, klassLAll)
+AccLL <- accuracyPP(LG17$PDS_LINKE,ID_LL , klassLL) 
+AccLC <- accuracy(LG17$PDS_LINKE,ID_CL , klassLC)
+AccLF <- accuracy(LG17$PDS_LINKE,ID_FL , klassLF)
+AccLG <- accuracy(LG17$PDS_LINKE,ID_GL , klassLG)
+AccLS <- accuracy(LG17$PDS_LINKE,ID_SL , klassLS)
+#AccLA <- accuracy(LG17$PDS_LINKE,ID_LA , klassLA)
+
+AccCAll <- accuracy(LG17$CDU_CSU, testId, klassCAll)
+AccCC <- accuracyPP(LG17$CDU_CSU,ID_CC , klassCC)
+AccCS <- accuracy(LG17$CDU_CSU,ID_CS , klassCS) 
+AccCF <- accuracy(LG17$CDU_CSU,ID_CF , klassCF)
+AccCL <- accuracy(LG17$CDU_CSU,ID_CL , klassCL)
+AccCG <- accuracy(LG17$CDU_CSU,ID_CG , klassCG)
+#AccCA <- accuracy(LG17$CDU_CSU,ID_UA , klassCA)
+
+#AccAA <- accuracyPP(LG17$Afd,ID_AA , klassUS)
+#AccAS <- accuracy(LG17$Afd,ID_AS , klassUS)
+#AccAF <- accuracy(LG17$Afd,ID_AF , klassUF)
+#AccAL <- accuracy(LG17$Afd,ID_AL , klassUL)
+#AccAG <- accuracy(LG17$Afd,ID_AG , klassUG)
+#AccAU <- accuracy(LG17$Afd,ID_AU, klassUA)
+
+
+ResultsAccurancy <- matrix( nrow = 7, ncol = 6)
+ModelParty <- c("Modell_Union", "Modell_SPD", "Modell_FDP", "Modell_Linke", "Modell_Grüne")
+Parties <- c("Union", "SPD", "FDP", "Linke", "Grüne", "All")
+U <- round(c(AccCC, AccCS, AccCF, AccCL, AccCG, AccCAll), digits = 3)
+S <- round(c(AccSC, AccSS, AccSF, AccSL, AccSG, AccSAll), digits = 3)
+F <- round(c(AccFG, AccFL, AccFF, AccFS, AccFC, AccFAll), digits = 3)
+L <- round(c(AccLC,AccLF, AccLG, AccLL, AccLS, AccLAll), digits = 3)
+G <- round(c(AccGC, AccGF, AccGL, AccGS, AccGG, AccGAll), digits = 3)
+
+for(elem in  2:6){
+  ResultsAccurancy[1,elem] = ModelParty[elem-1]
+}
+for(elem in  2:7){
+  ResultsAccurancy[elem,1] = Parties[elem-1]
+}
+for(elem in 2:7){
+  ResultsAccurancy[elem, 2] = U[elem-1]
+}
+for(elem in 2:7){
+  ResultsAccurancy[elem, 3] = S[elem-1]
+}
+for(elem in 2:7){
+  ResultsAccurancy[elem, 4] = F[elem-1]
+}
+for(elem in 2:7){
+  ResultsAccurancy[elem, 5] = L[elem-1]
+}
+for(elem in 2:7){
+  ResultsAccurancy[elem, 6] = G[elem-1]
+}
+
+# view
+ResultsAccurancy%>%view()
+
+# save
+sink("./ResultsAccurancy.html") 
+stargazer(ResultsAccurancy, type = "html")
+library(stargazer)
+sink(NULL)
+
+
+
+## 9.3 precision 
+#AccFF <- precision(LG17$FDP,ID_FF, klassFF) #??
+AccFAll <- precision(LG17$CDU_CSU, testId, klassCAll)
+AccFG <- precision(LG17$FDP,ID_FG, klassFG)
+AccFL <- precision(LG17$FDP,ID_FL, klassFL)
+AccFS <- precision(LG17$FDP,ID_FS, klassFS)
+AccFC <- precision(LG17$FDP,ID_CF, klassFC) 
+#AccFA <- precision(LG17$FDP,ID_FA , klassFA)
+
+#AccSS <- precision(LG17$SPD,ID_SS , klassSS) #??
+AccSAll <- precision(LG17$SPD, testId, klassSAll) 
+AccSC <- precision(LG17$SPD,ID_CS , klassSC)
+AccSF <- precision(LG17$SPD,ID_FS , klassSF)
+AccSL <- precision(LG17$SPD,ID_SL , klassSL)
+AccSG <- precision(LG17$SPD,ID_SG , klassSG)
+#AccSA <- precision(LG17$SPD,ID_SA , klassSA)
+
+#AccGG <- precision(LG17$GRUENE,ID_GG , klassGG) #??
+AccGAll <- precision(LG17$GRUENE, testId, klassGAll)
+AccGC <- precision(LG17$GRUENE,ID_CG , klassGC)
+AccGF <- precision(LG17$GRUENE,ID_FG , klassGF)
+AccGL <- precision(LG17$GRUENE,ID_GL , klassGL)
+AccGS <- precision(LG17$GRUENE,ID_SG , klassGS)
+#AccGA <- precision(LG17$GRUENE,ID_GA , klassGA)
+
+#AccLL <- precision(LG17$PDS_LINKE,ID_UG , klassLL) #??
+AccLAll <- precision(LG17$PDS_LINKE, testId, klassLAll)
+AccLC <- precision(LG17$PDS_LINKE,ID_CL , klassLC)
+AccLF <- precision(LG17$PDS_LINKE,ID_FL , klassLF)
+AccLG <- precision(LG17$PDS_LINKE,ID_GL , klassLG)
+AccLS <- precision(LG17$PDS_LINKE,ID_SL , klassLS)
+#AccLA <- precision(LG17$PDS_LINKE,ID_LA , klassLA)
+
+#AccCC <- precision(LG17$CDU_CSU,ID_CG , klassCC) #??
+AccCAll <- precision(LG17$CDU_CSU, testId, klassCAll)
+AccCS <- precision(LG17$CDU_CSU,ID_CS , klassCS) 
+AccCF <- precision(LG17$CDU_CSU,ID_CF , klassCF)
+AccCL <- precision(LG17$CDU_CSU,ID_CL , klassCL)
+AccCG <- precision(LG17$CDU_CSU,ID_CG , klassCG)
+#AccCA <- precision(LG17$CDU_CSU,ID_UA , klassCA)
+
+#AccAA <- precision(LG17$Afd,ID_AA , klassUS)
+#AccAS <- precision(LG17$Afd,ID_AS , klassUS)
+#AccAF <- precision(LG17$Afd,ID_AF , klassUF)
+#AccAL <- precision(LG17$Afd,ID_AL , klassUL)
+#AccAG <- precision(LG17$Afd,ID_AG , klassUG)
+#AccAU <- precision(LG17$Afd,ID_AU, klassUA)
+
+
+ResultsPrecision <- matrix( nrow = 7, ncol = 6)
+ModelParty <- c("Modell_Union", "Modell_SPD", "Modell_FDP", "Modell_Linke", "Modell_Grüne")
+Parties <- c("Union", "SPD", "FDP", "Linke", "Grüne", "All")
+U <- round(c(NA, AccCS, AccCF, AccCL, AccCG, AccCAll), digits = 3)
+S <- round(c(AccSC,NA, AccSF, AccSL, AccSG, AccSAll), digits = 3)
+F <- round(c(AccFG, AccFL, NA, AccFS, AccFC, AccFAll), digits = 3)
+L <- round(c(AccLC,AccLF, AccLG, NA, AccLS, AccLAll), digits = 3)
+G <- round(c(AccGC, AccGF, AccGL, AccGS, NA, AccGAll), digits = 3)
+
+for(elem in  2:6){
+  ResultsPrecision[1,elem] = ModelParty[elem-1]
+}
+for(elem in  2:7){
+  ResultsPrecision[elem,1] = Parties[elem-1]
+}
+for(elem in 2:7){
+  ResultsPrecision[elem, 2] = U[elem-1]
+}
+for(elem in 2:7){
+  ResultsPrecision[elem, 3] = S[elem-1]
+}
+for(elem in 2:7){
+  ResultsPrecision[elem, 4] = F[elem-1]
+}
+for(elem in 2:7){
+  ResultsPrecision[elem, 5] = L[elem-1]
+}
+for(elem in 2:7){
+  ResultsPrecision[elem, 6] = G[elem-1]
+}
+
+# view
+ResultsPrecision%>%view()
+
+# save
+sink("./ResultsPrecision.html") 
+stargazer(ResultsPrecision, type = "html")
+library(stargazer)
+sink(NULL)
+
+
+## 9.4 recall 
+AccFAll <- recall(LG17$CDU_CSU, testId, klassCAll)
+AccFF <- recallPP(LG17$FDP,ID_FF, klassFF) 
+AccFG <- recall(LG17$FDP,ID_FG, klassFG)
+AccFL <- recall(LG17$FDP,ID_FL, klassFL)
+AccFS <- recall(LG17$FDP,ID_FS, klassFS)
+AccFC <- recall(LG17$FDP,ID_CF, klassFC) 
+#AccFA <- recall(LG17$FDP,ID_FA , klassFA)
+
+AccSAll <- recall(LG17$SPD, testId, klassSAll) 
+AccSS <- recallPP(LG17$SPD,ID_SS , klassSS) 
+AccSC <- recall(LG17$SPD,ID_CS , klassSC)
+AccSF <- recall(LG17$SPD,ID_FS , klassSF)
+AccSL <- recall(LG17$SPD,ID_SL , klassSL)
+AccSG <- recall(LG17$SPD,ID_SG , klassSG)
+#AccSA <- recall(LG17$SPD,ID_SA , klassSA)
+
+AccGAll <- recall(LG17$GRUENE, testId, klassGAll)
+AccGG <- recallPP(LG17$GRUENE,ID_GG , klassGG) 
+AccGC <- recall(LG17$GRUENE,ID_CG , klassGC)
+AccGF <- recall(LG17$GRUENE,ID_FG , klassGF)
+AccGL <- recall(LG17$GRUENE,ID_GL , klassGL)
+AccGS <- recall(LG17$GRUENE,ID_SG , klassGS)
+#AccGA <- recall(LG17$GRUENE,ID_GA , klassGA)
+
+AccLAll <- recall(LG17$PDS_LINKE, testId, klassLAll)
+AccLL <- recallPP(LG17$PDS_LINKE,ID_LL , klassLL) 
+AccLC <- recall(LG17$PDS_LINKE,ID_CL , klassLC)
+AccLF <- recall(LG17$PDS_LINKE,ID_FL , klassLF)
+AccLG <- recall(LG17$PDS_LINKE,ID_GL , klassLG)
+AccLS <- recall(LG17$PDS_LINKE,ID_SL , klassLS)
+#AccLA <- recall(LG17$PDS_LINKE,ID_LA , klassLA)
+
+AccCAll <- recall(LG17$CDU_CSU, testId, klassCAll)
+AccCC <- recallPP(LG17$CDU_CSU,ID_CC , klassCC) 
+AccCS <- recall(LG17$CDU_CSU,ID_CS , klassCS) 
+AccCF <- recall(LG17$CDU_CSU,ID_CF , klassCF)
+AccCL <- recall(LG17$CDU_CSU,ID_CL , klassCL)
+AccCG <- recall(LG17$CDU_CSU,ID_CG , klassCG)
+#AccCA <- recall(LG17$CDU_CSU,ID_UA , klassCA)
+
+#AccAA <- recall(LG17$Afd,ID_AA , klassUS)
+#AccAS <- recall(LG17$Afd,ID_AS , klassUS)
+#AccAF <- recall(LG17$Afd,ID_AF , klassUF)
+#AccAL <- recall(LG17$Afd,ID_AL , klassUL)
+#AccAG <- recall(LG17$Afd,ID_AG , klassUG)
+#AccAU <- recall(LG17$Afd,ID_AU, klassUA)
+
+
+ResultsRecall <- matrix( nrow = 7, ncol = 6)
+Parties <- c("Union", "SPD", "FDP", "Linke", "Grüne")
+ModelParty <- c("Modell_Union", "Modell_SPD", "Modell_FDP", "Modell_Linke", "Modell_Grüne")
+U <- round(c(AccCC, AccCS, AccCF, AccCL, AccCG, AccCAll), digits = 3)
+S <- round(c(AccSC,AccSS, AccSF, AccSL, AccSG, AccSAll), digits = 3)
+F <- round(c(AccFG, AccFL, AccFF, AccFS, AccFC, AccFAll), digits = 3)
+L <- round(c(AccLC,AccLF, AccLG, AccLL, AccLS, AccLAll), digits = 3)
+G <- round(c(AccGC, AccGF, AccGL, AccGS, AccGG, AccGAll), digits = 3)
+
+for(elem in  2:6){
+  ResultsRecall[1,elem] = ModelParty[elem-1]
+}
+for(elem in  2:7){
+  ResultsRecall[elem,1] = Parties[elem-1]
+}
+for(elem in 2:7){
+  ResultsRecall[elem, 2] = U[elem-1]
+}
+for(elem in 2:7){
+  ResultsRecall[elem, 3] = S[elem-1]
+}
+for(elem in 2:7){
+  ResultsRecall[elem, 4] = F[elem-1]
+}
+for(elem in 2:7){
+  ResultsRecall[elem, 5] = L[elem-1]
+}
+for(elem in 2:7){
+  ResultsRecall[elem, 6] = G[elem-1]
+}
+# view
+ResultsRecall%>%view()
+
+# save
+sink("./ResultsRecall.html") 
+stargazer(ResultsRecall, type = "html")
+library(stargazer)
+sink(NULL)
+
+```
+
