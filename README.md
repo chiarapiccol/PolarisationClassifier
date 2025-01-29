@@ -1,5 +1,5 @@
 # Polarisation Classifier
-This repository contains the RMarkdown analysis for University Project. The project focuses on classifying and analyzing parliamentary speeches from the German Bundestag from 1991 to 2018.
+This repository contains the RMarkdown analysis for the Seminar "Text Analysis" by Dr. Benjamin Guinaudeau. The project focuses on classifying and analyzing parliamentary speeches from the German Bundestag from 1991 to 2018.
 
 ## 1. Data Preparation
 Install necessary packages.
